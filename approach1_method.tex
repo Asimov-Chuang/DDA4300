@@ -1,0 +1,83 @@
+\subsection{Method for Approach 1: Dual-price Learning}
+
+We focus on the online auction market and implement the two dual-price learning
+methods in Approach 1.1 and Approach 1.2.  The market has $n=10000$ bidders and
+$m=10$ resources.  The inventory is set to $b_i=1000$ for each resource
+$i=1,\ldots,m$.  To generate an online input sequence, we first fix a positive
+ground-truth price vector $\bar p\in\mathbb{R}^m_+$, draw each resource request
+$a_{ij}$ independently from a Bernoulli distribution with probability $1/2$, and
+then set
+\[
+    \pi_j = \bar p^\top a_j + \epsilon_j,
+    \qquad \epsilon_j\sim N(0, 0.2^2).
+\]
+All random data are generated with seed 420 to make the experiment reproducible.
+The generated bidders arrive in the order $j=1,\ldots,n$, and the algorithms
+must decide whether to accept bidder $j$ before observing future bidders.
+
+As a benchmark, we solve the full offline linear program
+\[
+\begin{aligned}
+    \max_x \quad & \sum_{j=1}^n \pi_j x_j \\
+    \text{s.t.}\quad
+        & \sum_{j=1}^n a_{ij}x_j \le b_i,\qquad i=1,\ldots,m,\\
+        & 0\le x_j\le 1,\qquad j=1,\ldots,n.
+\end{aligned}
+\]
+This offline objective value is used only for evaluation, not for online
+decisions.
+
+\paragraph{Approach 1.1: one-time learning.}
+For each learning size
+\[
+    k\in\{50,100,200,400,800,1600,3200,6400\},
+\]
+we reject the first $k$ bidders and use them as a training sample.  We solve the
+scaled sample linear program
+\[
+\begin{aligned}
+    \max_{x_1,\ldots,x_k}\quad
+        & \sum_{j=1}^k \pi_j x_j\\
+    \text{s.t.}\quad
+        & \sum_{j=1}^k a_{ij}x_j \le \frac{k}{n}b_i,
+          \qquad i=1,\ldots,m,\\
+        & 0\le x_j\le 1,\qquad j=1,\ldots,k.
+\end{aligned}
+\]
+Let $\bar y^k$ be the optimal dual multiplier of the resource constraints.  For
+each later bidder $j>k$, the algorithm accepts the bidder if
+\[
+    \pi_j > a_j^\top \bar y^k
+\]
+and the remaining inventory can cover $a_j$ componentwise.  Otherwise the bidder
+is rejected.  The vector $\bar y^k$ is fixed for the rest of the horizon.
+
+\paragraph{Approach 1.2: dynamic updating.}
+The dynamic method recomputes the dual price at doubling update times
+\[
+    k_t\in\{50,100,200,400,800,1600,3200,6400\}.
+\]
+The first 50 bidders are used as an initial warm-up sample.  At time $k_t$, we
+resolve the same scaled sample LP using all bidders observed up to $k_t$ and
+obtain a new resource price $\bar y^{k_t}$.  This price is then used to make
+accept/reject decisions for bidders $j=k_t+1,\ldots,k_{t+1}$, with the last
+price used until bidder $n$.  The remaining inventory is updated after each
+accepted bidder, so no online solution can violate the original capacity
+constraints.
+
+\paragraph{Evaluation.}
+For each method, we record total revenue, number of accepted bidders, resource
+utilization, remaining inventory, LP solving time, and online decision time.  The
+main performance measure is the competitive ratio
+\[
+    \text{competitive ratio}
+    =
+    \frac{\text{online revenue}}{\text{offline LP revenue}}.
+\]
+The Python implementation solves all LPs with
+\texttt{scipy.optimize.linprog} using the HiGHS solver.  Since
+\texttt{linprog} minimizes by default, the objective is implemented as
+$-\pi^\top x$.  HiGHS reports inequality marginals as minimization sensitivity
+values, so the resource prices for the original maximization LP are taken as the
+negative of \texttt{res.ineqlin.marginals}.  These prices are then used in the
+online threshold rule above.
